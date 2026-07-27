@@ -37,6 +37,8 @@ type Mode = 'list' | 'filter' | 'confirm' | 'help';
 
 interface Confirm {
   targets: KillTarget[];
+  /** What the user aimed at, for the result message. */
+  subject: string;
   label: string;
   force: boolean;
   risk: RiskLevel;
@@ -434,12 +436,12 @@ export class Ui {
 
     const reclaimed = procs.reduce((sum, proc) => sum + proc.rss, 0);
     const count = `${procs.length} process${procs.length === 1 ? '' : 'es'}`;
-    const label =
-      rows.length === 1 && rows[0]!.kind === 'group'
-        ? `${rows[0]!.group.name} · ${count} · ${bytes(reclaimed)}`
-        : `${count} · ${bytes(reclaimed)}`;
+    const apps = new Set(rows.map((row) => row.group.name));
+    const subject = apps.size === 1 ? [...apps][0]! : `${apps.size} apps`;
+    const label = `${subject} · ${count} · ${bytes(reclaimed)}`;
 
     this.confirm = {
+      subject,
       targets: procs.map((proc) => ({
         pid: proc.pid,
         name: `${proc.name} (${proc.pid})`,
@@ -457,7 +459,7 @@ export class Ui {
   private async executeKill(pending: Confirm): Promise<void> {
     this.confirm = null;
     this.mode = 'list';
-    this.toast = `killing ${pending.targets.length}…`;
+    this.toast = `killing ${pending.subject} (${pending.targets.length})…`;
     this.toastUntil = Date.now() + 10000;
     this.render();
 
@@ -468,7 +470,7 @@ export class Ui {
     });
 
     this.selected.clear();
-    this.flash(summarize(outcomes));
+    this.flash(summarize(outcomes, pending.subject));
     await this.refresh();
   }
 

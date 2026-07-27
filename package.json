@@ -1,6 +1,6 @@
 {
   "name": "hogkill",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Interactive terminal tool to find and kill the processes hogging your machine",
   "keywords": [
     "cli",

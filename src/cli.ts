@@ -343,7 +343,9 @@ async function runKill(groups: Group[], options: Options): Promise<number> {
     escalateAfter: options.force ? 0 : options.escalateAfter,
     dryRun: options.dryRun,
   });
-  process.stdout.write(`${summarize(outcomes)}\n`);
+  const subject =
+    batches.length === 1 ? batches[0]!.group.name : `${batches.length} apps`;
+  process.stdout.write(`${summarize(outcomes, subject)}\n`);
   return outcomes.some((outcome) => outcome.status === 'denied' || outcome.status === 'survived') ? 1 : 0;
 }
 

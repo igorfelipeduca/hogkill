@@ -122,7 +122,13 @@ export async function killTargets(
   return [...outcomes.values()];
 }
 
-export function summarize(outcomes: KillOutcome[]): string {
+/** `subject` is what the user aimed at — an app name, or "3 apps" for a batch. */
+export function summarize(outcomes: KillOutcome[], subject: string): string {
+  if (outcomes.length === 0) return 'nothing to kill';
+  if (outcomes.some((outcome) => outcome.status === 'dry-run')) {
+    return `dry run — ${subject} (${outcomes.length}) would be killed`;
+  }
+
   let down = 0;
   let denied = 0;
   let survived = 0;
@@ -133,11 +139,11 @@ export function summarize(outcomes: KillOutcome[]): string {
   }
 
   const parts: string[] = [];
-  if (down) parts.push(`${down} killed`);
+  if (down) parts.push(`${subject} (${down}) killed!`);
+  else if (denied || survived) parts.push(`${subject} survived`);
+
   if (denied) parts.push(`${denied} denied (needs sudo)`);
-  if (survived) parts.push(`${survived} survived`);
-  if (outcomes.some((o) => o.status === 'dry-run')) {
-    return `dry run — ${outcomes.length} process${outcomes.length === 1 ? '' : 'es'} would be killed`;
-  }
+  if (survived && down) parts.push(`${survived} still alive`);
+
   return parts.join(' · ') || 'nothing to kill';
 }
