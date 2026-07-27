@@ -3,7 +3,7 @@ import type { Group, Proc, RiskLevel, SortKey, Warning } from './types.js';
 import { CORES, ProcessSampler } from './ps.js';
 import { collectWarnings, groupProcesses, highestRisk, sortGroups } from './group.js';
 import { killTargets, summarize, type KillTarget } from './kill.js';
-import { RISK_WORD, riskMark } from './risk.js';
+import { RISK_TAG, RISK_WORD, riskTint } from './risk.js';
 import {
   bar,
   bytes,
@@ -51,6 +51,10 @@ export class Ui {
   private readonly expanded = new Set<string>();
   private readonly selected = new Set<string>();
 
+  /** Row order carried across refreshes so nothing moves under the cursor. */
+  private order: string[] = [];
+  private readonly procOrder = new Map<string, number[]>();
+
   private groups: Group[] = [];
   private rows: Row[] = [];
   private procCount = 0;
@@ -60,6 +64,7 @@ export class Ui {
   private filterDraft = '';
   private cursor = 0;
   private offset = 0;
+  private pinned = false;
   private toast = '';
   private toastUntil = 0;
   private confirm: Confirm | null = null;
@@ -110,6 +115,14 @@ export class Ui {
     this.resolveExit?.();
   }
 
+  /**
+   * The list only re-ranks while you are parked at the top with nothing picked.
+   * The moment you start moving, positions hold still and only the numbers move.
+   */
+  private held(): boolean {
+    return this.pinned || this.cursor > 0 || this.selected.size > 0 || this.mode !== 'list';
+  }
+
   private async refresh(): Promise<void> {
     if (this.busy || this.stopped) return;
     this.busy = true;
@@ -123,13 +136,57 @@ export class Ui {
         filter: this.filter,
         safeOnly: this.options.safeOnly,
       });
-      this.groups = sortGroups(grouped, this.sort);
+
+      const hold = this.held();
+      const ordered = hold ? this.applyOrder(grouped) : sortGroups(grouped, this.sort);
+      if (hold) for (const group of ordered) this.applyProcOrder(group);
+      this.rememberOrder(ordered);
+
+      this.groups = ordered;
       this.rebuildRows();
       this.render();
     } catch (error) {
       this.flash(`sample failed: ${(error as Error).message}`);
     } finally {
       this.busy = false;
+    }
+  }
+
+  /** Keeps every known row where it was; anything new lands at the bottom. */
+  private applyOrder(groups: Group[]): Group[] {
+    const byKey = new Map(groups.map((group) => [group.key, group]));
+    const kept: Group[] = [];
+    for (const key of this.order) {
+      const group = byKey.get(key);
+      if (group) {
+        kept.push(group);
+        byKey.delete(key);
+      }
+    }
+    return [...kept, ...sortGroups([...byKey.values()], this.sort)];
+  }
+
+  private applyProcOrder(group: Group): void {
+    const remembered = this.procOrder.get(group.key);
+    if (!remembered) return;
+
+    const byPid = new Map(group.procs.map((proc) => [proc.pid, proc]));
+    const kept: Proc[] = [];
+    for (const pid of remembered) {
+      const proc = byPid.get(pid);
+      if (proc) {
+        kept.push(proc);
+        byPid.delete(pid);
+      }
+    }
+    group.procs = [...kept, ...byPid.values()];
+  }
+
+  private rememberOrder(groups: Group[]): void {
+    this.order = groups.map((group) => group.key);
+    this.procOrder.clear();
+    for (const group of groups) {
+      this.procOrder.set(group.key, group.procs.map((proc) => proc.pid));
     }
   }
 
@@ -236,6 +293,10 @@ export class Ui {
       case 'D':
         this.requestKill(true);
         return;
+      case 'p':
+        this.pinned = !this.pinned;
+        this.flash(this.pinned ? 'order pinned' : 'order live again');
+        return;
       case 's':
         this.reorder(SORT_CYCLE[(SORT_CYCLE.indexOf(this.sort) + 1) % SORT_CYCLE.length]!);
         break;
@@ -250,6 +311,7 @@ export class Ui {
         this.filterDraft = this.filter;
         break;
       case 'r':
+        this.reorder(this.sort);
         void this.refresh();
         return;
       case '?':
@@ -261,9 +323,14 @@ export class Ui {
     this.render();
   }
 
+  /** Changing the sort is an explicit request to re-rank, hold or not. */
   private reorder(sort: SortKey): void {
     this.sort = sort;
     this.groups = sortGroups(this.groups, sort);
+    for (const group of this.groups) {
+      group.procs.sort((a, b) => b.cpu - a.cpu || b.rss - a.rss);
+    }
+    this.rememberOrder(this.groups);
     this.rebuildRows();
   }
 
@@ -284,6 +351,7 @@ export class Ui {
     if (this.filterDraft !== this.filter) {
       this.filter = this.filterDraft;
       this.cursor = 0;
+      this.order = [];
       void this.refresh();
     }
     this.render();
@@ -432,9 +500,19 @@ export class Ui {
     if (this.mode === 'help') {
       lines.push(...this.helpBody(width, body));
     } else {
+      // Bars are relative to the worst offender in view: scaling them against
+      // total cores or total RAM leaves every row visually empty.
+      const scale = this.groups.reduce(
+        (peak, group) => ({
+          cpu: Math.max(peak.cpu, group.cpu),
+          rss: Math.max(peak.rss, group.rss),
+        }),
+        { cpu: 1, rss: 1 },
+      );
+
       const slice = this.rows.slice(this.offset, this.offset + body);
       slice.forEach((row, index) => {
-        lines.push(this.renderRow(row, width, this.offset + index === this.cursor));
+        lines.push(this.renderRow(row, width, this.offset + index === this.cursor, scale));
       });
       for (let i = slice.length; i < body; i++) {
         lines.push(this.rows.length === 0 && i === 0 ? paint.dim('  nothing matches') : '');
@@ -456,18 +534,22 @@ export class Ui {
     const busy = this.groups.reduce((sum, group) => sum + group.cpu, 0);
     const cpuRatio = busy / (CORES * 100);
     const memRatio = used / TOTAL_MEM;
-    const load = loadavg()[0]!.toFixed(2);
 
     const title = paint.bold(paint.magenta('hogkill'));
-    const right = paint.gray(`sort ${this.sort}${this.filter ? ` · /${this.filter}` : ''}`);
+    const state = this.held()
+      ? paint.yellow(`⏸ ${this.pinned ? 'pinned' : 'held'}`)
+      : paint.green('● live');
+    const right = paint.gray(
+      `${state}${paint.gray(` · sort ${this.sort}`)}${this.filter ? paint.gray(` · /${this.filter}`) : ''}`,
+    );
 
     // Least useful stat goes first: on a narrow terminal the tail gets dropped
-    // rather than truncated, so sort and filter stay readable.
+    // rather than truncated, so state, sort and filter stay readable.
     const stats = [
       `${this.procCount} procs`,
       `${heat(cpuRatio * 100, 50, 80)(`cpu ${percent(cpuRatio * 100)}`)} ${paint.gray(bar(cpuRatio, 10))}`,
       `${heat(memRatio * 100, 70, 88)(`ram ${bytes(used)}/${bytes(TOTAL_MEM)}`)} ${paint.gray(bar(memRatio, 10))}`,
-      paint.gray(`load ${load}`),
+      paint.gray(`load ${loadavg()[0]!.toFixed(2)}`),
     ];
 
     let left = `${title}  ${stats.join(paint.gray(' · '))}`;
@@ -481,68 +563,68 @@ export class Ui {
   }
 
   private layout(width: number) {
-    const withBars = width >= 96;
-    // Rows stop one column short so a full-width line never wraps.
-    const fixed = 4 + 8 + 11 + 8 + 1 + 12 + (withBars ? 14 : 0);
-    return { withBars, name: Math.max(12, width - 1 - fixed) };
+    const withUser = width >= 100;
+    const withBars = width >= 116;
+    // Cursor, checkbox, cpu, memory, count, risk, and optionally user and bars.
+    const fixed = 5 + 8 + 11 + 9 + 9 + (withUser ? 11 : 0) + (withBars ? 14 : 0);
+    return { withUser, withBars, name: Math.max(14, width - 1 - fixed) };
   }
 
   private columns(width: number): string {
-    const { withBars, name } = this.layout(width);
-    const spacer = ` ${' '.repeat(6)}`;
-    const parts = [
-      '    ',
-      fit('NAME', name),
-      padStart('CPU', 8),
-      withBars ? spacer : '',
-      padStart('MEMORY', 11),
-      withBars ? spacer : '',
-      padStart('PROCS', 8),
-      ' ',
-      fit('USER', 12),
-    ];
-    return paint.gray(parts.join(''));
+    const { withUser, withBars, name } = this.layout(width);
+    const spacer = ' '.repeat(7);
+    return paint.gray(
+      [
+        '     ',
+        fit('NAME', name),
+        padStart('CPU', 7),
+        withBars ? spacer : '',
+        padStart('MEMORY', 11),
+        withBars ? spacer : '',
+        padStart('PROCS·AGE', 9),
+        '  ',
+        fit('RISK', 8),
+        withUser ? ` ${fit('USER', 10)}` : '',
+      ].join(''),
+    );
   }
 
-  private renderRow(row: Row, width: number, active: boolean): string {
-    const { withBars, name } = this.layout(width);
+  private renderRow(
+    row: Row,
+    width: number,
+    active: boolean,
+    scale: { cpu: number; rss: number },
+  ): string {
+    const { withUser, withBars, name } = this.layout(width);
     const isGroup = row.kind === 'group';
     const cpu = isGroup ? row.group.cpu : row.proc.cpu;
     const rss = isGroup ? row.group.rss : row.proc.rss;
     const risk = isGroup ? row.group.risk : row.proc.risk;
-    const marked = this.selected.has(row.id);
 
-    const marker = marked ? paint.red('◉') : active ? paint.cyan('›') : ' ';
+    const cursor = active ? paint.cyan('❯') : ' ';
+    const box = this.selected.has(row.id) ? paint.red('[x]') : paint.gray('[ ]');
     const caret = isGroup
       ? row.group.procs.length > 1
         ? this.expanded.has(row.group.key)
           ? '▾ '
           : '▸ '
         : '  '
-      : '├ ';
-
+      : '  ';
     const label = isGroup
-      ? row.group.name
-      : `${padStart(String(row.proc.pid), 7)} ${row.proc.name}`;
-    const nameCell = fit(`${caret}${label}`, name);
-
-    const cpuRatio = cpu / (CORES * 100);
-    const memRatio = rss / TOTAL_MEM;
-    const extra = isGroup
-      ? padStart(String(row.group.procs.length), 8)
-      : padStart(duration(row.proc.elapsed), 8);
-    const userCell = fit(isGroup ? row.group.user : row.proc.user, 12);
+      ? `${caret}${row.group.name}`
+      : `${caret}${paint.gray('└')} ${padStart(String(row.proc.pid), 6)} ${row.proc.name}`;
 
     const cells = [
-      ` ${marker}${riskMark(risk)} `,
-      isGroup ? nameCell : paint.gray(nameCell),
-      heat(cpu, 60, 150)(padStart(percent(cpu), 8)),
-      withBars ? ` ${paint.gray(bar(cpuRatio, 6))}` : '',
-      heat(memRatio * 100, 8, 20)(padStart(bytes(rss), 11)),
-      withBars ? ` ${paint.gray(bar(memRatio, 6))}` : '',
-      paint.gray(extra),
-      ' ',
-      paint.gray(userCell),
+      `${cursor}${box} `,
+      isGroup ? fit(label, name) : paint.gray(fit(label, name)),
+      heat(cpu, 60, 150)(padStart(percent(cpu), 7)),
+      withBars ? ` ${paint.gray(bar(cpu / scale.cpu, 6))}` : '',
+      heat((rss / TOTAL_MEM) * 100, 8, 20)(padStart(bytes(rss), 11)),
+      withBars ? ` ${paint.gray(bar(rss / scale.rss, 6))}` : '',
+      paint.gray(padStart(isGroup ? String(row.group.procs.length) : duration(row.proc.elapsed), 9)),
+      '  ',
+      riskTint(risk)(fit(RISK_TAG[risk], 8)),
+      withUser ? ` ${paint.gray(fit(isGroup ? row.group.user : row.proc.user, 10))}` : '',
     ].join('');
 
     return active ? highlight(cells) : cells;
@@ -557,11 +639,15 @@ export class Ui {
       '            d kill (SIGTERM, then SIGKILL if it hangs on)',
       '            D kill now (SIGKILL)',
       '',
-      `  ${paint.bold('view')}      / filter · s cycle sort · c cpu · m memory · r refresh · q quit`,
+      `  ${paint.bold('view')}      / filter · s cycle sort · c cpu · m memory · p pin · q quit`,
       '',
-      `  ${paint.bold('risk')}      ${paint.red('▲')} critical — the OS leans on it; can freeze or log you out`,
-      `            ${paint.yellow('▲')} system — part of the OS stops working until it restarts`,
-      `            ${paint.cyan('◆')} hogkill itself, or the terminal it runs in`,
+      `  ${paint.bold('order')}     ${paint.green('● live')} only while you sit at the top with nothing selected.`,
+      `            ${paint.yellow('⏸ held')} the moment you move — numbers keep updating, rows stay put.`,
+      '            g returns to the top and lets it re-rank · p pins it for good',
+      '',
+      `  ${paint.bold('risk')}      ${paint.red('critical')} the OS leans on it; can freeze or log you out`,
+      `            ${paint.yellow('system')}   part of the OS stops working until it restarts`,
+      `            ${paint.cyan('you')}      hogkill itself, or the terminal it runs in`,
       '',
       `  ${paint.dim('hogkill never refuses a kill — it shows the cost, then obeys.')}`,
       '',
@@ -577,9 +663,13 @@ export class Ui {
       const { warnings, risk } = this.confirm;
 
       for (const warning of warnings.slice(0, 3)) {
-        const mark = riskMark(warning.level);
-        const tint = warning.level === 'critical' ? paint.red : warning.level === 'own' ? paint.cyan : paint.yellow;
-        lines.push(truncate(`  ${mark} ${tint(warning.name)} ${paint.gray(`— ${warning.reason}`)}`, width));
+        const tint = riskTint(warning.level);
+        lines.push(
+          truncate(
+            `  ${tint(RISK_TAG[warning.level])} ${warning.name} ${paint.gray(`— ${warning.reason}`)}`,
+            width,
+          ),
+        );
       }
       if (warnings.length > 3) {
         lines.push(paint.gray(`  …and ${warnings.length - 3} more risky processes in this batch`));
@@ -614,11 +704,11 @@ export class Ui {
       return [truncate(paint.yellow(this.toast), width)];
     }
 
-    const selection = this.selected.size > 0 ? paint.red(`${this.selected.size} selected  `) : '';
-    const hints = paint.gray(
-      '↑↓ move · → expand · space select · d kill · D force · / filter · s sort · ? help · q quit',
-    );
-    return [truncate(`${selection}${hints}`, width)];
+    const selected = this.selected.size > 0 ? paint.red(`${this.selected.size} selected · `) : '';
+    const hints = this.held()
+      ? `${paint.yellow('rows held still')} ${paint.gray('· g top to re-rank · space select · d kill · / filter · ? help · q quit')}`
+      : paint.gray('↑↓ move · → expand · space select · d kill · / filter · s sort · ? help · q quit');
+    return [truncate(`${selected}${hints}`, width)];
   }
 }
 

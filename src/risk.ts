@@ -4,17 +4,25 @@ import { executablePath } from './naming.js';
 import { paint } from './format.js';
 import type { Proc, RiskInfo, RiskLevel } from './types.js';
 
-/** Built per call so `--no-color` still applies after argument parsing. */
-export function riskMark(level: RiskLevel): string {
+/** Short label shown in the risk column. */
+export const RISK_TAG: Record<RiskLevel, string> = {
+  none: '',
+  system: 'system',
+  own: 'you',
+  critical: 'critical',
+};
+
+/** Resolved per call so `--no-color` still applies after argument parsing. */
+export function riskTint(level: RiskLevel): (text: string) => string {
   switch (level) {
     case 'critical':
-      return paint.red('▲');
+      return paint.red;
     case 'system':
-      return paint.yellow('▲');
+      return paint.yellow;
     case 'own':
-      return paint.cyan('◆');
+      return paint.cyan;
     default:
-      return ' ';
+      return (text: string) => text;
   }
 }
 

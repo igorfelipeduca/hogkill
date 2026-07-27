@@ -8,16 +8,16 @@ which of the forty Electron helpers is to blame. `hogkill` gives you one line pe
 lets you kill it with one key.
 
 ```
-hogkill  918 procs · cpu 34.1% ███▍       · ram 12.4 GB/18.0 GB ██████▉    · load 3.21    sort cpu
+hogkill  918 procs · cpu 34.1% ███▍  · ram 12.4 GB/18.0 GB ██████▉             ⏸ held · sort cpu
 ────────────────────────────────────────────────────────────────────────────────────────────────
-    NAME                                  CPU          MEMORY        PROCS USER
- ›  ▾ Google Chrome                     132.4% ████▏    4.21 GB ██▏      14 duca
-    ├   4821 Google Chrome Helper (Ren…  88.1% ███      1.02 GB ▌      2h14m duca
-    ├   4790 Google Chrome               21.3% ▊         680 MB ▍      2h14m duca
-    ▸ Slack                              18.2% ▋         912 MB ▌         6 duca
- ▲  ▸ WindowServer                        9.4% ▍          54 MB           1 _windowserver
+     NAME                                  CPU       MEMORY      PROCS·AGE  RISK      USER
+ [ ] ▾ Google Chrome                     132.4% ███  4.21 GB ███        14            duca
+ [ ]   └   4821 Chrome Helper (Renderer)  88.1% ██   1.02 GB ▊       2h14m            duca
+ [ ]   └   4790 Google Chrome              1.3% ▏     680 MB ▌       2h14m            duca
+❯[x] ▸ Slack                              18.2% ▍     912 MB ▋           6            duca
+ [ ]   WindowServer                        9.4% ▎      54 MB             1  critical  _windowserver
 ────────────────────────────────────────────────────────────────────────────────────────────────
-↑↓ move · → expand · space select · d kill · D force · / filter · s sort · ? help · q quit
+rows held still · g top to re-rank · space select · d kill · / filter · ? help · q quit
 ```
 
 ## Install
@@ -54,7 +54,22 @@ hogkill --json | jq .      # feed it to something else
 | `D` | kill now — straight SIGKILL |
 | `/` | filter by name, command line or PID |
 | `s` `c` `m` | cycle sort / sort by CPU / sort by memory |
+| `p` | pin the order so it never re-ranks |
 | `r` `?` `q` | refresh · help · quit |
+
+### The list doesn't move under your cursor
+
+A live CPU ranking re-sorts every second, which makes picking a row impossible —
+you aim at Chrome, the refresh lands, and you kill Spotify.
+
+So hogkill only re-ranks while you are **parked at the top with nothing
+selected** (`● live` in the corner). The moment you move down, select something,
+or open a dialog, positions **hold still** (`⏸ held`) and only the numbers keep
+updating. Press `g` to go back to the top and let it re-rank, or `p` to pin the
+order for good. Changing the sort (`s` `c` `m`) always re-ranks — you asked for it.
+
+CPU is also smoothed across samples, so a row doesn't swing between 4% and 90%
+while you read it.
 
 ### Options
 
@@ -83,16 +98,18 @@ hogkill --json | jq .      # feed it to something else
 
 `hogkill` never refuses a kill. It tells you what breaks, then does what you asked.
 
-| mark | meaning |
+Every row carries a `RISK` column:
+
+| tag | meaning |
 | --- | --- |
-| ▲ red | **critical** — the OS leans on it. Killing it can panic, freeze or log you out. |
-| ▲ yellow | **system** — a daemon the OS uses. Something stops working until it restarts. |
-| ◆ cyan | **your session** — hogkill itself, or the shell/terminal it runs in. |
+| `critical` | the OS leans on it. Killing it can panic, freeze or log you out. |
+| `system` | a daemon the OS uses. Something stops working until it restarts. |
+| `you` | hogkill itself, or the shell/terminal it runs in. |
 
 Before any kill, the confirmation bar spells out the consequence in plain words:
 
 ```
-  ▲ WindowServer — draws every window; logs you out instantly
+  critical WindowServer — draws every window; logs you out instantly
 [dry run] kill CRITICAL system process WindowServer · 1 process · 73.4 MB · SIGTERM?
 y yes · K force · n cancel
 ```
@@ -115,7 +132,9 @@ when you want the report without the funeral.
 - One `ps` call per refresh, parsed into a process table.
 - CPU is a **delta**: `ps` reports an average over the whole lifetime of a
   process, which tells you nothing about what is hot right now, so hogkill
-  diffs consumed CPU time between two samples instead.
+  diffs consumed CPU time between two samples instead, then smooths the result.
+- Bars are relative to the biggest row on screen, not to total cores or total
+  RAM — scaled against the machine, every bar reads as empty.
 - Processes are folded into apps by their `.app` bundle (macOS), interpreter
   script (`node server.js`), or executable name — so all 14 Chrome helpers land
   on one row with one total.

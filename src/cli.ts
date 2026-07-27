@@ -5,7 +5,7 @@ import { platform, userInfo } from 'node:os';
 import type { Group, Proc, SortKey } from './types.js';
 import { ProcessSampler } from './ps.js';
 import { collectWarnings, groupProcesses, highestRisk, sortGroups } from './group.js';
-import { riskMark } from './risk.js';
+import { RISK_TAG, riskTint } from './risk.js';
 import { killTargets, summarize, type KillTarget } from './kill.js';
 import { bytes, fit, padStart, paint, percent, setColor } from './format.js';
 import { Ui } from './ui.js';
@@ -66,15 +66,18 @@ ${b('OPTIONS')}
   -h, --help             this
   -v, --version          version
 
-${b('RISK MARKS')}
-  ${paint.red('▲')}  critical — the OS leans on it; killing it can freeze or log you out
-  ${paint.yellow('▲')}  system daemon — part of the OS stops working until it restarts
-  ${paint.cyan('◆')}  hogkill itself, or the terminal it runs in
+${b('RISK COLUMN')}
+  ${paint.red('critical')}  the OS leans on it; killing it can freeze or log you out
+  ${paint.yellow('system')}    a daemon the OS uses; part of it stops working until it restarts
+  ${paint.cyan('you')}       hogkill itself, or the terminal it runs in
   ${paint.dim('hogkill never blocks a kill. It spells out the damage first, then obeys.')}
 
 ${b('KEYS')}
   ↑↓ / kj move    → expand app    space select    d kill    D force kill
-  / filter        s cycle sort    c cpu   m mem   r refresh   ? help   q quit
+  / filter        s cycle sort    c cpu   m mem   p pin order   ? help   q quit
+
+  ${paint.dim('The list only re-ranks while the cursor sits at the top with nothing')}
+  ${paint.dim('selected. Move, and rows hold still while the numbers keep updating.')}
 `;
 }
 
@@ -228,7 +231,8 @@ function printWarnings(procs: Proc[]): void {
   process.stdout.write(`\n${headline}\n`);
 
   for (const warning of warnings) {
-    process.stdout.write(`  ${riskMark(warning.level)} ${warning.name} ${paint.gray(`— ${warning.reason}`)}\n`);
+    const tag = riskTint(warning.level)(fit(RISK_TAG[warning.level], 9));
+    process.stdout.write(`  ${tag} ${warning.name} ${paint.gray(`— ${warning.reason}`)}\n`);
   }
   process.stdout.write('\n');
 }
@@ -257,30 +261,30 @@ function printList(groups: Group[], options: Options): void {
   }
 
   const width = Math.max(60, process.stdout.columns || 100);
-  const nameWidth = Math.max(16, width - 46);
+  const nameWidth = Math.max(16, width - 47);
   process.stdout.write(
-    `${paint.gray(`  ${fit('NAME', nameWidth)}${padStart('CPU', 8)}${padStart('MEMORY', 11)}${padStart('PROCS', 7)}  USER`)}\n`,
+    `${paint.gray(`${fit('NAME', nameWidth)}${padStart('CPU', 7)}${padStart('MEMORY', 11)}${padStart('PROCS', 6)}  ${fit('RISK', 9)}USER`)}\n`,
   );
 
   const shown = groups.slice(0, options.top);
   for (const group of shown) {
+    const tag = riskTint(group.risk)(fit(RISK_TAG[group.risk], 9));
     process.stdout.write(
-      `${riskMark(group.risk)} ${fit(group.name, nameWidth)}${padStart(percent(group.cpu), 8)}${padStart(bytes(group.rss), 11)}${padStart(String(group.procs.length), 7)}  ${group.user}\n`,
+      `${fit(group.name, nameWidth)}${padStart(percent(group.cpu), 7)}${padStart(bytes(group.rss), 11)}${padStart(String(group.procs.length), 6)}  ${tag}${group.user}\n`,
     );
 
     if (!options.flat) continue;
     for (const proc of group.procs) {
+      const procTag = riskTint(proc.risk)(fit(RISK_TAG[proc.risk], 9));
       process.stdout.write(
-        `${riskMark(proc.risk)} ${paint.gray(`  ${fit(`${proc.pid} ${proc.name}`, nameWidth - 2)}${padStart(percent(proc.cpu), 8)}${padStart(bytes(proc.rss), 11)}`)}\n`,
+        `${paint.gray(`  ${fit(`${proc.pid} ${proc.name}`, nameWidth - 2)}${padStart(percent(proc.cpu), 7)}${padStart(bytes(proc.rss), 11)}${' '.repeat(8)}`)}${procTag}\n`,
       );
     }
   }
 
   if (shown.some((group) => group.risk !== 'none')) {
     process.stdout.write(
-      paint.gray(
-        `\n${riskMark('critical')} critical · ${riskMark('system')} system · ${riskMark('own')} your session — run with --json to see why\n`,
-      ),
+      paint.gray(`\nrisk: what breaks if you kill it — run with --json to read the reason\n`),
     );
   }
 }
@@ -311,8 +315,9 @@ async function runKill(groups: Group[], options: Options): Promise<number> {
   for (const batch of batches) {
     const count = batch.procs.length;
     const size = batch.procs.reduce((sum, proc) => sum + proc.rss, 0);
+    const tag = riskTint(batch.group.risk)(fit(RISK_TAG[batch.group.risk], 9));
     process.stdout.write(
-      `  ${riskMark(batch.group.risk)} ${batch.group.name} ${paint.gray(`— ${count} proc${count === 1 ? '' : 's'}, ${bytes(size)}`)}\n`,
+      `  ${tag} ${batch.group.name} ${paint.gray(`— ${count} proc${count === 1 ? '' : 's'}, ${bytes(size)}`)}\n`,
     );
   }
 

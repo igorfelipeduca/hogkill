@@ -39,7 +39,11 @@ function psArgs(): string[] {
 interface Prev {
   at: number;
   cpuSeconds: Map<number, number>;
+  /** Smoothed CPU per pid, so the numbers stop flickering between refreshes. */
+  smoothed: Map<number, number>;
 }
+
+const SMOOTHING = 0.6;
 
 /**
  * Reads the process table. `ps` reports %CPU averaged over the whole lifetime
@@ -56,6 +60,7 @@ export class ProcessSampler {
     const at = Date.now();
     const elapsedSinceLast = this.prev ? (at - this.prev.at) / 1000 : 0;
     const cpuSeconds = new Map<number, number>();
+    const smoothed = new Map<number, number>();
     const procs: Proc[] = [];
 
     for (const line of stdout.split('\n')) {
@@ -73,7 +78,13 @@ export class ProcessSampler {
       if (before !== undefined && elapsedSinceLast > 0.2 && cpuTime >= before) {
         cpu = ((cpuTime - before) / elapsedSinceLast) * 100;
       }
-      cpu = Math.min(MAX_CPU, Math.max(0, Math.round(cpu * 10) / 10));
+      cpu = Math.min(MAX_CPU, Math.max(0, cpu));
+      const previous = this.prev?.smoothed.get(pid);
+      if (previous !== undefined) {
+        cpu = previous * (1 - SMOOTHING) + cpu * SMOOTHING;
+      }
+      smoothed.set(pid, cpu);
+      cpu = Math.round(cpu * 10) / 10;
 
       procs.push({
         pid,
@@ -90,7 +101,7 @@ export class ProcessSampler {
       });
     }
 
-    this.prev = { at, cpuSeconds };
+    this.prev = { at, cpuSeconds, smoothed };
     markRisk(procs);
     return procs;
   }
