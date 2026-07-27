@@ -19,7 +19,7 @@ export function groupProcesses(procs: Proc[], options: GroupOptions): Group[] {
   for (const proc of procs) {
     if (options.user && proc.user !== options.user) continue;
     if (options.safeOnly && proc.risk !== 'none') continue;
-    const key = `${proc.user} ${groupName(proc.command)}`;
+    const key = `${proc.user} ${groupName(proc.command, proc.exe)}`;
     const bucket = buckets.get(key);
     if (bucket) bucket.push(proc);
     else buckets.set(key, [proc]);

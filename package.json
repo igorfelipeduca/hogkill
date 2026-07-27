@@ -39,10 +39,6 @@
   "engines": {
     "node": ">=18"
   },
-  "os": [
-    "darwin",
-    "linux"
-  ],
   "scripts": {
     "build": "rm -rf dist && tsc && chmod +x dist/cli.js",
     "dev": "tsc --watch",

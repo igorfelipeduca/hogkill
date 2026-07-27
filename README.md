@@ -7,7 +7,7 @@
 [![npm](https://img.shields.io/npm/v/hogkill?color=cb3837&logo=npm)](https://www.npmjs.com/package/hogkill)
 [![license](https://img.shields.io/npm/l/hogkill?color=blue)](./LICENSE)
 [![node](https://img.shields.io/node/v/hogkill)](https://nodejs.org)
-[![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](#requirements)
+[![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](#requirements)
 
 </div>
 
@@ -75,8 +75,30 @@ npm link        # puts `hogkill` and `hk` on your PATH
 
 ### Requirements
 
-Node 18+, macOS or Linux. It reads the process table through `ps(1)` — no native
-modules, no root, no daemon.
+Node 18+ on macOS, Linux or Windows. No native modules, no root, no daemon — it
+reads the process table through whatever the OS already ships: `ps(1)` on
+macOS and Linux, `Win32_Process` over CIM on Windows.
+
+<details>
+<summary>What differs on Windows</summary>
+
+Everything works — grouping, live CPU, the held list, the risk column — with
+three honest differences, all of them the platform's doing:
+
+- **Killing is always immediate.** Windows has no signals; every kill maps to
+  `TerminateProcess`, so an app never gets the chance to save. The prompt says
+  `TERMINATE` instead of `SIGTERM`, and `-9` is a no-op because there is nothing
+  gentler to escalate from.
+- **No `USER` column.** Ownership is not a property of `Win32_Process` — reading
+  it costs one extra CIM call per process, which would make every refresh crawl.
+  The column is hidden, and `--user` / `--me` refuse with an explanation.
+- **A PowerShell round-trip per refresh** instead of a `ps` call, so refreshes
+  cost a bit more. Raise `--interval` if you notice it.
+
+Grouping actually lands *better* on Windows: every Chrome renderer is
+`chrome.exe`, so they fold into one row without any bundle heuristics.
+
+</details>
 
 ## Usage
 
@@ -175,9 +197,12 @@ want the report without the funeral.
 
 ## How it works
 
-- One `ps` call per refresh, parsed into a process table.
+- One process-table read per refresh: `ps` on macOS and Linux, one CIM query on
+  Windows. The collector is the only platform-specific part; everything above it
+  works on the same shape of data.
 - CPU is a **delta** of consumed CPU time between two samples, then smoothed —
-  never the lifetime average `ps` hands you.
+  never the lifetime average `ps` hands you. Windows reports the same thing as
+  kernel + user time in 100-nanosecond ticks.
 - Processes fold into apps by their `.app` bundle (macOS), interpreter script
   (`node server.js`), or executable name.
 - Executable paths are recovered by walking space boundaries and keeping the
@@ -197,12 +222,16 @@ npm run dev       # tsc --watch
 node dist/cli.js  # run the local build
 ```
 
-The source is small and split by concern: `ps.ts` samples, `naming.ts` names
-things, `group.ts` folds, `risk.ts` judges, `kill.ts` signals, `ui.ts` draws,
-`cli.ts` parses arguments.
+The source is small and split by concern: `collect/` samples the process table
+per platform, `naming.ts` names things, `group.ts` folds, `risk.ts` judges,
+`kill.ts` signals, `ui.ts` draws, `cli.ts` parses arguments.
 
-Issues and pull requests are welcome — especially Linux fixes and additions to
-the risk table in `src/risk.ts`.
+CI runs the build and a live smoke test on macOS, Linux and Windows across Node
+18, 20 and 22 — including an assertion that the collector really sees that
+machine's processes.
+
+Issues and pull requests are welcome — the easiest place to help is the risk
+table in `src/risk.ts`, which is where hogkill learns what a process is worth.
 
 ## License
 

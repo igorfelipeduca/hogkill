@@ -1,8 +1,8 @@
 import { freemem, loadavg, totalmem } from 'node:os';
 import type { Group, Proc, RiskLevel, SortKey, Warning } from './types.js';
-import { CORES, ProcessSampler } from './ps.js';
+import { CORES, ProcessSampler, SUPPORTS_USERS } from './collect/index.js';
 import { collectWarnings, groupProcesses, highestRisk, sortGroups } from './group.js';
-import { killTargets, summarize, type KillTarget } from './kill.js';
+import { IMMEDIATE_ONLY, killTargets, killVerb, summarize, type KillTarget } from './kill.js';
 import { RISK_TAG, RISK_WORD, riskTint } from './risk.js';
 import {
   bar,
@@ -563,7 +563,7 @@ export class Ui {
   }
 
   private layout(width: number) {
-    const withUser = width >= 100;
+    const withUser = width >= 100 && SUPPORTS_USERS;
     const withBars = width >= 116;
     // Cursor, checkbox, cpu, memory, count, risk, and optionally user and bars.
     const fixed = 5 + 8 + 11 + 9 + 9 + (withUser ? 11 : 0) + (withBars ? 14 : 0);
@@ -636,8 +636,10 @@ export class Ui {
       `  ${paint.bold('navigate')}  ↑↓ / kj move · →← / lh expand · g G top/bottom · PgUp PgDn page`,
       '',
       `  ${paint.bold('act')}       space select · a select all · x clear selection`,
-      '            d kill (SIGTERM, then SIGKILL if it hangs on)',
-      '            D kill now (SIGKILL)',
+      IMMEDIATE_ONLY
+        ? '            d · D terminate (Windows has no graceful signal)'
+        : '            d kill (SIGTERM, then SIGKILL if it hangs on)',
+      IMMEDIATE_ONLY ? '' : '            D kill now (SIGKILL)',
       '',
       `  ${paint.bold('view')}      / filter · s cycle sort · c cpu · m memory · p pin · q quit`,
       '',
@@ -675,7 +677,7 @@ export class Ui {
         lines.push(paint.gray(`  …and ${warnings.length - 3} more risky processes in this batch`));
       }
 
-      const verb = this.confirm.force ? paint.red('SIGKILL') : 'SIGTERM';
+      const verb = this.confirm.force ? paint.red(killVerb(true)) : killVerb(false);
       const prefix = this.options.dryRun ? paint.yellow('[dry run] ') : '';
       const headline =
         risk === 'none' ? paint.bold('kill') : paint.red(paint.bold(`kill ${RISK_WORD[risk]}`));

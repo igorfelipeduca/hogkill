@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module';
 import { createInterface } from 'node:readline/promises';
-import { platform, userInfo } from 'node:os';
+import { userInfo } from 'node:os';
 import type { Group, Proc, SortKey } from './types.js';
-import { ProcessSampler } from './ps.js';
+import { ProcessSampler, SUPPORTS_USERS } from './collect/index.js';
 import { collectWarnings, groupProcesses, highestRisk, sortGroups } from './group.js';
 import { RISK_TAG, riskTint } from './risk.js';
 import { killTargets, summarize, type KillTarget } from './kill.js';
@@ -60,7 +60,7 @@ ${b('OPTIONS')}
       --json             machine readable output (implies --list)
   -k, --kill <text>      non-interactive kill by name match
   -y, --yes              skip the confirmation prompt
-  -9, --force            SIGKILL immediately, no SIGTERM first
+  -9, --force            SIGKILL immediately, no SIGTERM first (no-op on Windows)
       --dry-run          show what would die, kill nothing
       --no-color         plain output
   -h, --help             this
@@ -261,9 +261,9 @@ function printList(groups: Group[], options: Options): void {
   }
 
   const width = Math.max(60, process.stdout.columns || 100);
-  const nameWidth = Math.max(16, width - 47);
+  const nameWidth = Math.max(16, width - (SUPPORTS_USERS ? 47 : 37));
   process.stdout.write(
-    `${paint.gray(`${fit('NAME', nameWidth)}${padStart('CPU', 7)}${padStart('MEMORY', 11)}${padStart('PROCS', 6)}  ${fit('RISK', 9)}USER`)}\n`,
+    `${paint.gray(`${fit('NAME', nameWidth)}${padStart('CPU', 7)}${padStart('MEMORY', 11)}${padStart('PROCS', 6)}  ${fit('RISK', 9)}${SUPPORTS_USERS ? 'USER' : ''}`)}\n`,
   );
 
   const shown = groups.slice(0, options.top);
@@ -348,10 +348,12 @@ async function runKill(groups: Group[], options: Options): Promise<number> {
 }
 
 async function main(): Promise<void> {
-  if (platform() === 'win32') fail('windows is not supported — hogkill talks to ps(1)');
   if (!process.stdout.isTTY) setColor(false);
 
   const options = parseArgs(process.argv.slice(2));
+  if (options.user !== null && !SUPPORTS_USERS) {
+    fail('--user and --me need process ownership, which Windows does not report cheaply');
+  }
 
   if (options.kill !== null) {
     process.exit(await runKill(await collect(options), options));

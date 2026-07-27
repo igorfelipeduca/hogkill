@@ -8,9 +8,13 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         node: [18, 20, 22]
 
     steps:
@@ -26,5 +30,22 @@ jobs:
         run: |
           node dist/cli.js --version
           node dist/cli.js --list --top 5
+          node dist/cli.js --list --flat --top 3
           node dist/cli.js --json --top 3 > /dev/null
           node dist/cli.js --kill definitely-no-such-process || test $? -eq 1
+
+      - name: the collector must actually see this machine's processes
+        run: |
+          count=$(node dist/cli.js --json --top 100 | node -e "
+            let raw = '';
+            process.stdin.on('data', (chunk) => { raw += chunk; });
+            process.stdin.on('end', () => {
+              const groups = JSON.parse(raw);
+              const procs = groups.flatMap((group) => group.processes);
+              const named = procs.filter((proc) => proc.command && proc.pid > 0);
+              if (named.length !== procs.length) throw new Error('unnamed or invalid pids');
+              console.log(procs.length);
+            });
+          ")
+          echo "collected $count processes"
+          test "$count" -gt 10

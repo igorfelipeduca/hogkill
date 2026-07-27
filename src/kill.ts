@@ -1,3 +1,17 @@
+import { platform } from 'node:os';
+
+/**
+ * Windows has no signals: every kill maps to TerminateProcess, so an app never
+ * gets the chance to save. There is nothing to escalate to, and nothing gentle
+ * to promise — the UI says TERMINATE there instead of SIGTERM.
+ */
+export const IMMEDIATE_ONLY = platform() === 'win32';
+
+export function killVerb(force: boolean): string {
+  if (IMMEDIATE_ONLY) return 'TERMINATE';
+  return force ? 'SIGKILL' : 'SIGTERM';
+}
+
 export interface KillOptions {
   /** Skip SIGTERM and go straight to SIGKILL. */
   force: boolean;
@@ -21,6 +35,8 @@ export interface KillTarget {
 }
 
 export function isAlive(pid: number): boolean {
+  if (pid <= 0) return true;
+
   try {
     process.kill(pid, 0);
     return true;
@@ -30,6 +46,10 @@ export function isAlive(pid: number): boolean {
 }
 
 function send(pid: number, signal: NodeJS.Signals): 'sent' | 'gone' | 'denied' {
+  // POSIX kill(0) signals our entire process group — the terminal included.
+  // macOS reports kernel_task as pid 0, so this is reachable from the UI.
+  if (pid <= 0) return 'denied';
+
   try {
     process.kill(pid, signal);
     return 'sent';
@@ -63,7 +83,8 @@ export async function killTargets(
       continue;
     }
 
-    const signal: NodeJS.Signals = options.force ? 'SIGKILL' : 'SIGTERM';
+    const immediate = options.force || IMMEDIATE_ONLY;
+    const signal: NodeJS.Signals = immediate ? 'SIGKILL' : 'SIGTERM';
     const result = send(target.pid, signal);
     if (result === 'gone') {
       outcomes.set(target.pid, { ...target, status: 'gone' });
@@ -71,14 +92,17 @@ export async function killTargets(
       outcomes.set(target.pid, {
         ...target,
         status: 'denied',
-        error: 'permission denied — rerun with sudo',
+        error:
+          target.pid <= 0
+            ? 'pid 0 is the kernel, not a killable process'
+            : 'permission denied — rerun with sudo',
       });
     } else {
       outcomes.set(target.pid, {
         ...target,
-        status: options.force ? 'killed' : 'terminated',
+        status: immediate ? 'killed' : 'terminated',
       });
-      if (!options.force) pending.push(target);
+      if (!immediate) pending.push(target);
     }
   }
 

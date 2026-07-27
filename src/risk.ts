@@ -1,6 +1,5 @@
-import { basename } from 'node:path';
 import { platform } from 'node:os';
-import { executablePath } from './naming.js';
+import { baseName } from './naming.js';
 import { paint } from './format.js';
 import type { Proc, RiskInfo, RiskLevel } from './types.js';
 
@@ -104,7 +103,45 @@ const LINUX: Record<string, Known> = {
   pulseaudio: { level: 'system', reason: 'audio server; sound dies' },
 };
 
+const WINDOWS: Record<string, Known> = {
+  System: { level: 'critical', reason: 'the Windows kernel; the machine bugchecks' },
+  Registry: { level: 'critical', reason: 'the registry process; Windows bugchecks' },
+  smss: { level: 'critical', reason: 'the session manager; instant blue screen' },
+  csrss: { level: 'critical', reason: 'the Win32 subsystem; instant blue screen' },
+  wininit: { level: 'critical', reason: 'starts every system service; instant blue screen' },
+  winlogon: { level: 'critical', reason: 'owns your logon session; you get signed out' },
+  services: { level: 'critical', reason: 'the service control manager; Windows bugchecks' },
+  lsass: { level: 'critical', reason: 'local security authority; instant blue screen' },
+  LsaIso: { level: 'critical', reason: 'credential guard; instant blue screen' },
+  dwm: { level: 'critical', reason: 'the desktop compositor; the screen goes black' },
+  svchost: { level: 'system', reason: 'hosts Windows services; networking or audio may drop' },
+  explorer: { level: 'system', reason: 'taskbar, desktop and file windows (restarts on its own)' },
+  fontdrvhost: { level: 'system', reason: 'font rendering for the session' },
+  audiodg: { level: 'system', reason: 'audio device graph; sound dies until it restarts' },
+  spoolsv: { level: 'system', reason: 'the print spooler; printing stops' },
+  WmiPrvSE: { level: 'system', reason: 'WMI provider host; hogkill itself reads through WMI' },
+  SearchIndexer: { level: 'system', reason: 'Windows Search; results go stale until it restarts' },
+  RuntimeBroker: { level: 'system', reason: 'brokers permissions for Store apps' },
+  sihost: { level: 'system', reason: 'shell infrastructure; parts of the UI stop responding' },
+  ctfmon: { level: 'system', reason: 'text input and IME' },
+  taskhostw: { level: 'system', reason: 'host for scheduled background tasks' },
+  conhost: { level: 'system', reason: 'console window host; a terminal window may close' },
+  MsMpEng: { level: 'system', reason: 'Microsoft Defender antivirus engine' },
+  SecurityHealthService: { level: 'system', reason: 'Windows Security monitoring' },
+};
+
 const SYSTEM_USERS = new Set(['root', 'daemon', 'nobody', 'systemd-network', 'systemd-resolve']);
+
+function table(): Record<string, Known> {
+  switch (platform()) {
+    case 'darwin':
+      return DARWIN;
+    case 'win32':
+      return WINDOWS;
+    default:
+      return LINUX;
+  }
+}
 
 /** Explains what a process is worth before you kill it. */
 export function assessRisk(proc: Proc, lineage: Set<number>): RiskInfo {
@@ -115,9 +152,8 @@ export function assessRisk(proc: Proc, lineage: Set<number>): RiskInfo {
     return { level: 'critical', reason: 'PID 1; the whole system hangs off it' };
   }
 
-  const exe = basename(executablePath(proc.command));
-  const table = platform() === 'darwin' ? DARWIN : LINUX;
-  const known = table[exe] ?? table[proc.name];
+  const exe = baseName(proc.exe);
+  const known = table()[exe] ?? table()[proc.name];
   if (known) return known;
 
   if (lineage.has(proc.pid)) {

@@ -9,20 +9,29 @@ export interface RiskInfo {
   reason: string;
 }
 
-export interface Proc {
+/** What a platform collector reports, before CPU is turned into a rate. */
+export interface RawProc {
   pid: number;
   ppid: number;
-  /** Percentage of a single core. Instantaneous once two samples exist. */
-  cpu: number;
   /** Resident set size in bytes. */
   rss: number;
   /** Total CPU seconds burned since the process started. */
   cpuSeconds: number;
   /** Wall-clock seconds since the process started. */
   elapsed: number;
+  /** Empty on platforms that do not report ownership cheaply. */
   user: string;
   /** Full command line. */
   command: string;
+  /** Path of the executable, resolved by the collector. */
+  exe: string;
+  /** Whatever CPU figure the platform offers before two samples exist. */
+  fallbackCpu: number;
+}
+
+export interface Proc extends RawProc {
+  /** Percentage of a single core. Instantaneous once two samples exist. */
+  cpu: number;
   /** Short, human readable name. */
   name: string;
   risk: RiskLevel;
