@@ -44,7 +44,7 @@
     "linux"
   ],
   "scripts": {
-    "build": "tsc && chmod +x dist/cli.js",
+    "build": "rm -rf dist && tsc && chmod +x dist/cli.js",
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
     "prepare": "npm run build"
