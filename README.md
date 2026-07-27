@@ -150,6 +150,7 @@ Also available as `hk`.
 -9, --force            SIGKILL immediately, no SIGTERM first
     --dry-run          show what would die, kill nothing
     --no-color         plain output
+    --no-update-check  never ask npm whether a newer hogkill exists
 ```
 
 ## The list doesn't move under your cursor
@@ -194,6 +195,30 @@ Two things happen quietly on your behalf, because they only ever bite:
 
 Use `--safe-only` to hide anything the OS depends on, and `--dry-run` when you
 want the report without the funeral.
+
+## It tells you when it is out of date
+
+Once a day hogkill asks the npm registry whether a newer version was published.
+If one was, the footer says so — bottom right, next to the key hints:
+
+```
+↑↓ move · → expand · space select · d kill · / filter · s sort · q quit   ▲ 0.3.0 available · npm i -g hogkill
+```
+
+On a narrow terminal it drops to its own line rather than pushing the hints off
+screen. It never blocks anything: the lookup runs alongside the first sample,
+lands in the footer whenever it answers, and a registry that is slow, down or
+firewalled is ignored without a word. Quitting mid-lookup does not wait for it.
+
+The answer is cached for a day in `~/.cache/hogkill` (`%LOCALAPPDATA%\hogkill`
+on Windows), so it is at most one request per day; a failed lookup backs off for
+an hour instead.
+
+Nothing is sent anywhere else — it is a plain GET of the package's public
+metadata, with no identifiers attached. It never runs in `--list`, `--json` or
+`--kill` mode, when output is not a terminal, or under `CI`. Turn it off for
+good with `--no-update-check`, `HOGKILL_NO_UPDATE_CHECK=1` or the conventional
+`NO_UPDATE_NOTIFIER=1`. `HOGKILL_REGISTRY` points it at a different registry.
 
 ## How it works
 
