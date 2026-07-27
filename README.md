@@ -1,11 +1,20 @@
+<div align="center">
+
 # hogkill
 
-`npkill`, but for the processes eating your machine.
+**`npkill`, but for the processes eating your machine.**
 
-You know the feeling: the fan spins up, everything stutters, and you have no idea
-which of the forty Electron helpers is to blame. `hogkill` gives you one line per
-**app** — not per PID — sorted by what it is actually costing you right now, and
-lets you kill it with one key.
+[![npm](https://img.shields.io/npm/v/hogkill?color=cb3837&logo=npm)](https://www.npmjs.com/package/hogkill)
+[![license](https://img.shields.io/npm/l/hogkill?color=blue)](./LICENSE)
+[![node](https://img.shields.io/node/v/hogkill)](https://nodejs.org)
+[![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](#requirements)
+
+</div>
+
+The fan spins up, everything stutters, and you have no idea which of the forty
+Electron helpers is to blame. `hogkill` gives you one line per **app** — not per
+PID — ranked by what it is actually costing you right now, and kills it with one
+key.
 
 ```
 hogkill  918 procs · cpu 34.1% ███▍  · ram 12.4 GB/18.0 GB ██████▉             ⏸ held · sort cpu
@@ -20,27 +29,67 @@ hogkill  918 procs · cpu 34.1% ███▍  · ram 12.4 GB/18.0 GB ███�
 rows held still · g top to re-rank · space select · d kill · / filter · ? help · q quit
 ```
 
+## Why
+
+`top` and `htop` show you processes. Your machine has 900 of them, and the app
+you actually want to kill is smeared across 40 rows named `Helper (Renderer)`.
+Activity Monitor groups them, but you cannot reach it from a terminal, over SSH,
+or without lifting your hands off the keyboard.
+
+`hogkill` folds the process table into apps the way `npkill` folds `node_modules`
+into projects, tells you what each one really costs, and gets out of the way.
+
+- **One row per app.** All 14 Chrome helpers, one total, one keystroke.
+- **CPU that means something.** `ps` reports an average over a process's entire
+  lifetime — useless for "what is hot right now". hogkill diffs consumed CPU
+  time between samples and smooths the result.
+- **A list that holds still.** A live ranking that re-sorts under your cursor is
+  unusable. This one freezes the moment you start navigating.
+- **Guardrails that explain instead of forbid.** It never refuses a kill; it
+  tells you exactly what breaks first.
+- **Zero runtime dependencies.** One `ps` call per refresh, nothing else.
+
 ## Install
 
 ```bash
-git clone <this repo> hogkill
-cd hogkill
-npm install     # builds on install
-npm link        # puts `hogkill` (and `hk`) on your PATH
+npm install -g hogkill
 ```
 
-Requires Node 18+. macOS and Linux — it reads the process table through `ps(1)`.
-
-## Use it
+Or run it without installing:
 
 ```bash
-hogkill                    # interactive, sorted by CPU
-hogkill -m                 # sorted by memory
+npx hogkill
+```
+
+<details>
+<summary>From source</summary>
+
+```bash
+git clone https://github.com/igorfelipeduca/hogkill.git
+cd hogkill
+npm install     # builds on install
+npm link        # puts `hogkill` and `hk` on your PATH
+```
+
+</details>
+
+### Requirements
+
+Node 18+, macOS or Linux. It reads the process table through `ps(1)` — no native
+modules, no root, no daemon.
+
+## Usage
+
+```bash
+hogkill                    # interactive, ranked by CPU
+hogkill -m                 # ranked by memory
 hogkill chrome             # start filtered
 hogkill --list --top 15    # print the top 15 and exit
 hogkill --kill "Slack" -y  # kill every Slack process, no prompt
 hogkill --json | jq .      # feed it to something else
 ```
+
+Also available as `hk`.
 
 ### Keys
 
@@ -48,28 +97,15 @@ hogkill --json | jq .      # feed it to something else
 | --- | --- |
 | `↑` `↓` / `k` `j` | move |
 | `→` `←` / `l` `h` | expand / collapse an app into its processes |
-| `space` | select (kill several at once) |
+| `space` | select — kill several at once |
 | `a` / `x` | select every app / clear the selection |
 | `d` | kill — SIGTERM, then SIGKILL for whatever hangs on |
 | `D` | kill now — straight SIGKILL |
 | `/` | filter by name, command line or PID |
 | `s` `c` `m` | cycle sort / sort by CPU / sort by memory |
 | `p` | pin the order so it never re-ranks |
+| `g` `G` | jump to top / bottom |
 | `r` `?` `q` | refresh · help · quit |
-
-### The list doesn't move under your cursor
-
-A live CPU ranking re-sorts every second, which makes picking a row impossible —
-you aim at Chrome, the refresh lands, and you kill Spotify.
-
-So hogkill only re-ranks while you are **parked at the top with nothing
-selected** (`● live` in the corner). The moment you move down, select something,
-or open a dialog, positions **hold still** (`⏸ held`) and only the numbers keep
-updating. Press `g` to go back to the top and let it re-rank, or `p` to pin the
-order for good. Changing the sort (`s` `c` `m`) always re-ranks — you asked for it.
-
-CPU is also smoothed across samples, so a row doesn't swing between 4% and 90%
-while you read it.
 
 ### Options
 
@@ -94,11 +130,21 @@ while you read it.
     --no-color         plain output
 ```
 
+## The list doesn't move under your cursor
+
+A live CPU ranking re-sorts every second, which makes picking a row impossible —
+you aim at Chrome, the refresh lands, and you kill Spotify.
+
+So hogkill only re-ranks while you are **parked at the top with nothing
+selected** (`● live` in the corner). The moment you move down, select something,
+or open a dialog, positions **hold still** (`⏸ held`) and only the numbers keep
+updating. Press `g` to return to the top and let it re-rank, or `p` to pin the
+order for good. Changing the sort always re-ranks — you asked for it.
+
 ## Guardrails
 
-`hogkill` never refuses a kill. It tells you what breaks, then does what you asked.
-
-Every row carries a `RISK` column:
+**hogkill never refuses a kill.** It tells you what breaks, then does what you
+asked. Every row carries a `RISK` column:
 
 | tag | meaning |
 | --- | --- |
@@ -106,16 +152,16 @@ Every row carries a `RISK` column:
 | `system` | a daemon the OS uses. Something stops working until it restarts. |
 | `you` | hogkill itself, or the shell/terminal it runs in. |
 
-Before any kill, the confirmation bar spells out the consequence in plain words:
+Before any kill, the confirmation spells out the consequence in plain words:
 
 ```
   critical WindowServer — draws every window; logs you out instantly
-[dry run] kill CRITICAL system process WindowServer · 1 process · 73.4 MB · SIGTERM?
+kill CRITICAL system process WindowServer · 1 process · 73.4 MB · SIGTERM?
 y yes · K force · n cancel
 ```
 
-The same warnings show up in `--kill` and in `--json` (`risk` / `riskReason`), so
-scripts can decide for themselves.
+The same reasons ride along in `--kill` output and in `--json` (`risk` /
+`riskReason`), so scripts can decide for themselves.
 
 Two things happen quietly on your behalf, because they only ever bite:
 
@@ -124,26 +170,40 @@ Two things happen quietly on your behalf, because they only ever bite:
 - When a batch includes your own session, those processes are signalled **last**,
   so killing your terminal doesn't abort the rest of the batch halfway through.
 
-Use `--safe-only` if you only ever want to see your own apps, and `--dry-run`
-when you want the report without the funeral.
+Use `--safe-only` to hide anything the OS depends on, and `--dry-run` when you
+want the report without the funeral.
 
 ## How it works
 
 - One `ps` call per refresh, parsed into a process table.
-- CPU is a **delta**: `ps` reports an average over the whole lifetime of a
-  process, which tells you nothing about what is hot right now, so hogkill
-  diffs consumed CPU time between two samples instead, then smooths the result.
-- Bars are relative to the biggest row on screen, not to total cores or total
-  RAM — scaled against the machine, every bar reads as empty.
-- Processes are folded into apps by their `.app` bundle (macOS), interpreter
-  script (`node server.js`), or executable name — so all 14 Chrome helpers land
-  on one row with one total.
+- CPU is a **delta** of consumed CPU time between two samples, then smoothed —
+  never the lifetime average `ps` hands you.
+- Processes fold into apps by their `.app` bundle (macOS), interpreter script
+  (`node server.js`), or executable name.
 - Executable paths are recovered by walking space boundaries and keeping the
-  longest prefix that is a real file, because macOS paths are full of spaces
-  and `ps` joins argv with spaces.
+  longest prefix that is a real file, because macOS paths are full of spaces and
+  `ps` joins argv with spaces.
+- Bars scale to the biggest row on screen, not to total cores or total RAM —
+  scaled against the machine, every bar reads as empty.
 - Kills go SIGTERM first so apps can save, then SIGKILL after 4s for survivors.
   `EPERM` is reported as "rerun with sudo" rather than swallowed.
 
+## Development
+
+```bash
+npm install       # installs deps and builds
+npm run build     # tsc + chmod
+npm run dev       # tsc --watch
+node dist/cli.js  # run the local build
+```
+
+The source is small and split by concern: `ps.ts` samples, `naming.ts` names
+things, `group.ts` folds, `risk.ts` judges, `kill.ts` signals, `ui.ts` draws,
+`cli.ts` parses arguments.
+
+Issues and pull requests are welcome — especially Linux fixes and additions to
+the risk table in `src/risk.ts`.
+
 ## License
 
-MIT
+[MIT](./LICENSE) © Igor Duca

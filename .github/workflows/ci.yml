@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [18, 20, 22]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - run: npm install
+      - run: npx tsc --noEmit
+
+      - name: smoke test
+        run: |
+          node dist/cli.js --version
+          node dist/cli.js --list --top 5
+          node dist/cli.js --json --top 3 > /dev/null
+          node dist/cli.js --kill definitely-no-such-process || test $? -eq 1

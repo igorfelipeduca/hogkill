@@ -16,6 +16,17 @@
   ],
   "license": "MIT",
   "author": "Igor Duca <yelldutz@gmail.com>",
+  "homepage": "https://github.com/igorfelipeduca/hogkill#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/igorfelipeduca/hogkill.git"
+  },
+  "bugs": {
+    "url": "https://github.com/igorfelipeduca/hogkill/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "hogkill": "dist/cli.js",
