@@ -1,0 +1,45 @@
+{
+  "name": "hogkill",
+  "version": "0.1.0",
+  "description": "Interactive terminal tool to find and kill the processes hogging your machine",
+  "keywords": [
+    "cli",
+    "tui",
+    "process",
+    "kill",
+    "cpu",
+    "memory",
+    "ram",
+    "top",
+    "htop",
+    "npkill"
+  ],
+  "license": "MIT",
+  "author": "Igor Duca <yelldutz@gmail.com>",
+  "type": "module",
+  "bin": {
+    "hogkill": "dist/cli.js",
+    "hk": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "scripts": {
+    "build": "tsc && chmod +x dist/cli.js",
+    "dev": "tsc --watch",
+    "start": "node dist/cli.js",
+    "prepare": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}
