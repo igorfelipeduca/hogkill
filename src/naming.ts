@@ -31,8 +31,16 @@ export function baseName(path: string): string {
   return tail.replace(/\.exe$/i, '');
 }
 
+/**
+ * `throwIfNoEntry` only covers ENOENT; restricted directories still throw
+ * EACCES, and a path nobody can stat is a path that is not a usable name.
+ */
 function isFile(path: string): boolean {
-  return statSync(path, { throwIfNoEntry: false })?.isFile() ?? false;
+  try {
+    return statSync(path, { throwIfNoEntry: false })?.isFile() ?? false;
+  } catch {
+    return false;
+  }
 }
 
 /**
