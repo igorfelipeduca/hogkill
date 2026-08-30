@@ -4,6 +4,7 @@ import { CORES, ProcessSampler, SUPPORTS_USERS } from './collect/index.js';
 import { collectWarnings, groupProcesses, highestRisk, sortGroups } from './group.js';
 import { IMMEDIATE_ONLY, killTargets, killVerb, summarize, type KillTarget } from './kill.js';
 import { RISK_TAG, RISK_WORD, riskTint } from './risk.js';
+import type { UpdateInfo } from './update.js';
 import {
   bar,
   bytes,
@@ -27,6 +28,8 @@ export interface UiOptions {
   safeOnly: boolean;
   dryRun: boolean;
   escalateAfter: number;
+  /** Resolves with the newer release on npm, or null. Never rejects. */
+  update: Promise<UpdateInfo | null>;
 }
 
 type Row =
@@ -70,6 +73,7 @@ export class Ui {
   private toast = '';
   private toastUntil = 0;
   private confirm: Confirm | null = null;
+  private update: UpdateInfo | null = null;
   private timer: NodeJS.Timeout | null = null;
   private busy = false;
   private stopped = false;
@@ -89,6 +93,13 @@ export class Ui {
     process.stdin.on('data', this.onKey);
     process.stdout.on('resize', this.onResize);
     process.on('SIGINT', this.onSigint);
+
+    // Whenever the registry answers, the footer picks it up. Nothing waits on it.
+    void this.options.update.then((info) => {
+      if (this.stopped || !info) return;
+      this.update = info;
+      this.render();
+    }, () => {});
 
     await this.refresh();
     this.timer = setInterval(() => {
@@ -712,7 +723,25 @@ export class Ui {
     const hints = this.held()
       ? `${paint.yellow('rows held still')} ${paint.gray('· g top to re-rank · space select · d kill · / filter · ? help · q quit')}`
       : paint.gray('↑↓ move · → expand · space select · d kill · / filter · s sort · ? help · q quit');
-    return [truncate(`${selected}${hints}`, width)];
+    const line = truncate(`${selected}${hints}`, width);
+
+    const notices = this.updateNotices();
+    if (notices.length === 0) return [line];
+
+    // Prefer riding along with the hints, shortening before stealing a row.
+    for (const notice of notices) {
+      const gap = width - visibleLength(line) - visibleLength(notice);
+      if (gap >= 2) return [`${line}${' '.repeat(gap)}${notice}`];
+    }
+    return [truncate(notices[0]!, width), line];
+  }
+
+  /** The update banner, longest form first. Empty when you are up to date. */
+  private updateNotices(): string[] {
+    if (!this.update) return [];
+    const { name, latest } = this.update;
+    const flag = paint.yellow(`▲ ${latest} available`);
+    return [`${flag} ${paint.gray(`· npm i -g ${name}`)}`, flag, paint.yellow(`▲ ${latest}`)];
   }
 }
 

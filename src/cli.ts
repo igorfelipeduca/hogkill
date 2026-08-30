@@ -8,10 +8,11 @@ import { collectWarnings, groupProcesses, highestRisk, sortGroups } from './grou
 import { RISK_TAG, riskTint } from './risk.js';
 import { killTargets, summarize, type KillTarget } from './kill.js';
 import { bytes, fit, padStart, paint, percent, setColor } from './format.js';
+import { checkForUpdate } from './update.js';
 import { Ui } from './ui.js';
 
 const require = createRequire(import.meta.url);
-const { version } = require('../package.json') as { version: string };
+const { name, version } = require('../package.json') as { name: string; version: string };
 
 const SORTS: SortKey[] = ['cpu', 'mem', 'count', 'name'];
 
@@ -32,6 +33,7 @@ interface Options {
   dryRun: boolean;
   safeOnly: boolean;
   escalateAfter: number;
+  updateCheck: boolean;
 }
 
 function usage(): string {
@@ -63,6 +65,7 @@ ${b('OPTIONS')}
   -9, --force            SIGKILL immediately, no SIGTERM first (no-op on Windows)
       --dry-run          show what would die, kill nothing
       --no-color         plain output
+      --no-update-check  never ask npm whether a newer hogkill exists
   -h, --help             this
   -v, --version          version
 
@@ -104,6 +107,7 @@ function parseArgs(argv: string[]): Options {
     dryRun: false,
     safeOnly: false,
     escalateAfter: 4000,
+    updateCheck: true,
   };
 
   const next = (index: number, flag: string): string => {
@@ -192,6 +196,9 @@ function parseArgs(argv: string[]): Options {
         break;
       case '--no-color':
         setColor(false);
+        break;
+      case '--no-update-check':
+        options.updateCheck = false;
         break;
       default:
         if (arg.startsWith('-')) fail(`unknown option "${arg}" — try --help`);
@@ -366,6 +373,10 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Fired before the first sample so the answer is usually there by the time
+  // the footer has anything else to say.
+  const update = options.updateCheck ? checkForUpdate(name, version) : Promise.resolve(null);
+
   const ui = new Ui({
     interval: options.interval,
     sort: options.sort,
@@ -376,6 +387,7 @@ async function main(): Promise<void> {
     safeOnly: options.safeOnly,
     dryRun: options.dryRun,
     escalateAfter: options.escalateAfter,
+    update,
   });
   await ui.start();
 }
